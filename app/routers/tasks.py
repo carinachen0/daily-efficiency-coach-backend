@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import List, Optional
-from datetime import date as Date
+from datetime import date as Date, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, status
 
@@ -74,6 +74,43 @@ async def update_task(task_id: str, payload: TaskUpdate):
     doc = await mongodb.collection("tasks").find_one({"_id": oid, "userId": user_id})
     return Task(**doc)
 
+# convenience endpoint: Complete a task by setting status to done
+@router.patch("/{task_id}/complete", response_model=Task)
+async def complete_task(task_id: str):
+    user_id = get_default_user_id()
+    oid = to_object_id(task_id)
+    
+    res = await mongodb.collection("tasks").update_one(
+        {"_id": oid, "userId": user_id},
+        {"$set": {"status": "done", "completedAt": now_utc(), "updatedAt": now_utc()}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    doc = await mongodb.collection("tasks").find_one({"_id": oid, "userId": user_id})
+    return Task(**doc)
+
+# convenience endpoint: optional if frontend needs a postpone button in the UI
+@router.patch("/{task_id}/postpone", response_model=Task)
+async def postpone_task(task_id: str, days: int = Query(default=1)):
+    user_id = get_default_user_id()
+    oid = to_object_id(task_id)
+    
+    # fetch current task to get existing dueAt
+    doc = await mongodb.collection("tasks").find_one({"_id": oid, "userId": user_id})
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    current_due = doc.get("dueAt") or now_utc()
+    new_due = current_due + timedelta(days=days)
+    
+    await mongodb.collection("tasks").update_one(
+        {"_id": oid, "userId": user_id},
+        {"$set": {"dueAt": new_due, "updatedAt": now_utc()}},
+    )
+    
+    updated = await mongodb.collection("tasks").find_one({"_id": oid, "userId": user_id})
+    return Task(**updated)
 
 @router.delete("/{task_id}")
 async def delete_task(task_id: str):
@@ -83,3 +120,4 @@ async def delete_task(task_id: str):
     if res.deleted_count == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     return {"deleted": True}
+
