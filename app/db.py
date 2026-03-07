@@ -34,12 +34,12 @@ class MongoDB:
         self.db = None
 
     def collection(self, name: str):
-        if not self.db:
+        if self.db is None:
             raise RuntimeError("MongoDB not connected.")
         return self.db[name]
 
     async def _ensure_indexes(self) -> None:
-        if not self.db:
+        if self.db is None:
             raise RuntimeError("MongoDB not connected.")
 
         for collection_name, indexes in MONGO_INDEXES.items():
