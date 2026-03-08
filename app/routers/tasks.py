@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import List, Optional
-from datetime import date as Date, timedelta
+from datetime import datetime, date as Date, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, status
 
@@ -16,6 +16,11 @@ router = APIRouter()
 async def create_task(payload: TaskCreate):
     user_id = get_default_user_id()
     doc = payload.model_dump()
+    
+    # combine date with midnight time to create datetime for MongoDB compatibility else 500 Internal Server Error
+    if doc.get("scheduledDate") and isinstance(doc["scheduledDate"], Date):
+        doc["scheduledDate"] = datetime.combine(doc["scheduledDate"], datetime.min.time())
+    
     doc.update(
         {"userId": user_id, "status": "todo", "createdAt": now_utc(), "updatedAt": now_utc()}
     )
@@ -37,7 +42,7 @@ async def list_tasks(
 
     if scheduled_date:
         y, m, d = map(int, scheduled_date.split("-"))
-        q["scheduledDate"] = Date(y, m, d)
+        q["scheduledDate"] = datetime(y, m, d)
 
     docs = await mongodb.collection("tasks").find(q).sort("createdAt", -1).to_list(length=500)
     return [Task(**d) for d in docs]
@@ -59,6 +64,9 @@ async def update_task(task_id: str, payload: TaskUpdate):
     oid = to_object_id(task_id)
 
     update = payload.model_dump(exclude_unset=True)
+    if "scheduledDate" in update and isinstance(update["scheduledDate"], Date):
+        update["scheduledDate"] = datetime.combine(update["scheduledDate"], datetime.min.time())
+    
     update["updatedAt"] = now_utc()
 
     if update.get("status") == "done" and "completedAt" not in update:
@@ -111,6 +119,39 @@ async def postpone_task(task_id: str, days: int = Query(default=1)):
     
     updated = await mongodb.collection("tasks").find_one({"_id": oid, "userId": user_id})
     return Task(**updated)
+
+# convenience endpoint: Start a task by setting status to in-progress
+@router.patch("/{task_id}/start", response_model=Task)
+async def start_task(task_id: str):
+    user_id = get_default_user_id()
+    oid = to_object_id(task_id)
+    
+    res = await mongodb.collection("tasks").update_one(
+        {"_id": oid, "userId": user_id},
+        {"$set": {"startedAt": now_utc(), "status": "in_progress", "updatedAt": now_utc()}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    doc = await mongodb.collection("tasks").find_one({"_id": oid, "userId": user_id})
+    return Task(**doc)
+
+
+# convenience endpoint: Skip a task by setting status to skipped
+@router.patch("/{task_id}/skip", response_model=Task)
+async def skip_task(task_id: str):
+    user_id = get_default_user_id()
+    oid = to_object_id(task_id)
+    
+    res = await mongodb.collection("tasks").update_one(
+        {"_id": oid, "userId": user_id},
+        {"$set": {"status": "skipped", "updatedAt": now_utc()}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    doc = await mongodb.collection("tasks").find_one({"_id": oid, "userId": user_id})
+    return Task(**doc)
 
 @router.delete("/{task_id}")
 async def delete_task(task_id: str):
