@@ -31,6 +31,43 @@ def habit_expected_on_day(habit: dict, day: Date) -> bool:
     return True
 
 
+@router.get("/tasks/delays")
+async def task_delays(days: int = Query(default=7, ge=1, le=365)):
+    """
+    How many tasks were completed on time vs late :
+      Late = completedAT > dueAt
+    """
+    user_id = get_default_user_id()
+    start_dt = datetime.utcnow() - timedelta(days=days)
+    
+    # fetch and analyze tasks that have a due date 
+    completed_tasks = await mongodb.collection("tasks").find(
+        {"userId": user_id, "status": "done", "completedAt": {"$gte": start_dt}, "dueAt": {"$exists": True, "$ne": None}}
+    ).to_list(length=500)
+    
+    on_time = 0
+    late = 0
+    total_delay_seconds = 0
+    
+    for task in completed_tasks:
+        due = task["dueAt"]
+        completed = task["completedAt"]
+        if completed <= due:
+            on_time += 1
+        else:
+            late += 1
+            total_delay_seconds += (completed-due).total_seconds()
+    
+    # Divide total delay seconds by number of late tasks to get average; convert to days
+    avg_delay_days = (total_delay_seconds / late / 86400) if late else 0 
+    
+    return {
+        "windowDays": days,
+        "onTime": on_time,
+        "late": late,
+        "avgDelayDays": round(avg_delay_days, 2)       
+    }
+
 @router.get("/tasks/completion-rate")
 async def task_completion_rate(days: int = Query(default=7, ge=1, le=365)):
     """
