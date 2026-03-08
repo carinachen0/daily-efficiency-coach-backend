@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date as Date
+from datetime import datetime, date as Date
 from typing import Any, Dict
 
 from fastapi import APIRouter, Query
@@ -51,8 +51,11 @@ async def today_view(date: str = Query(default=None)):
     else:
         day = Date.today()
 
+    # convert date to datetime for MongoDB query
+    day_dt = datetime.combine(day, datetime.min.time())
+    
     tasks = await mongodb.collection("tasks").find(
-        {"userId": user_id, "scheduledDate": day}
+        {"userId": user_id, "scheduledDate": day_dt}
     ).sort("createdAt", -1).to_list(length=500)
 
     habits = await mongodb.collection("habits").find(
@@ -65,7 +68,7 @@ async def today_view(date: str = Query(default=None)):
     logs = []
     if habit_ids:
         logs = await mongodb.collection("habitLogs").find(
-            {"userId": user_id, "habitId": {"$in": habit_ids}, "date": day}
+            {"userId": user_id, "habitId": {"$in": habit_ids}, "date": day_dt}
         ).to_list(length=1000)
 
     log_by_habit = {l["habitId"]: l for l in logs}

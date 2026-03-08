@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from typing import List
+from datetime import datetime, date as Date
+
 from fastapi import APIRouter, HTTPException, Query, status
 
 from app.db import mongodb
@@ -14,6 +16,11 @@ router = APIRouter()
 async def create_habit(payload: HabitCreate):
     user_id = get_default_user_id()
     doc = payload.model_dump()
+    
+    # convert date to datetime for MongoDB compatibility
+    if doc.get("startDate") and isinstance(doc["startDate"], Date):
+        doc["startDate"] = datetime.combine(doc["startDate"], datetime.min.time())
+    
     doc.update({"userId": user_id, "isActive": True, "createdAt": now_utc(), "updatedAt": now_utc()})
     res = await mongodb.collection("habits").insert_one(doc)
     created = await mongodb.collection("habits").find_one({"_id": res.inserted_id})
@@ -47,6 +54,11 @@ async def update_habit(habit_id: str, payload: HabitUpdate):
     oid = to_object_id(habit_id)
 
     update = payload.model_dump(exclude_unset=True)
+    
+    # convert date to datetime for MongoDB compatibility
+    if "startDate" in update and isinstance(update["startDate"], Date):
+        update["startDate"] = datetime.combine(update["startDate"], datetime.min.time())
+        
     update["updatedAt"] = now_utc()
 
     res = await mongodb.collection("habits").update_one(
