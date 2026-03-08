@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import List, Optional
-from datetime import date as Date
+from datetime import datetime, date as Date
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -20,6 +20,9 @@ async def upsert_log(payload: HabitLogCreate):
     user_id = get_default_user_id()
     habit_oid = to_object_id(payload.habitId)
     day = payload.date
+    
+    if isinstance(day, Date):
+        day = datetime.combine(day, datetime.min.time())
 
     update = payload.model_dump()
     update["habitId"] = habit_oid
@@ -76,10 +79,10 @@ async def list_logs(
         q["date"] = {}
         if start:
             y, m, d = map(int, start.split("-"))
-            q["date"]["$gte"] = Date(y, m, d)
+            q["date"]["$gte"] = datetime(y, m, d)
         if end:
             y, m, d = map(int, end.split("-"))
-            q["date"]["$lte"] = Date(y, m, d)
+            q["date"]["$lte"] = datetime(y, m, d)
 
     docs = await mongodb.collection("habitLogs").find(q).sort("date", -1).to_list(length=1000)
     return [HabitLog(**d) for d in docs]
