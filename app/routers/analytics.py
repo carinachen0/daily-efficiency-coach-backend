@@ -115,9 +115,12 @@ async def habit_streak(habit_id: str):
 
         if not habit_expected_on_day(habit, day):
             continue  # don't break on non-expected days
-
+        
+        # convert date to datetime for MongoDB query
+        day_dt = datetime.combine(day, datetime.min.time())
+    
         log = await mongodb.collection("habitLogs").find_one(
-            {"userId": user_id, "habitId": hid, "date": day}
+            {"userId": user_id, "habitId": hid, "date": day_dt}
         )
         if log and log.get("status") == "done":
             streak += 1
