@@ -67,7 +67,7 @@ class MongoBaseModel(BaseModel):
 
 
 Priority = Literal["low", "medium", "high"]
-TaskStatus = Literal["todo", "in_progress", "done", "skipped"]
+TaskStatus = Literal["todo", "in_progress", "done", "skipped", "postponed"]
 
 HabitTargetType = Literal["binary", "count", "duration"]
 HabitScheduleType = Literal["daily", "weekdays", "weekly_x", "custom"]

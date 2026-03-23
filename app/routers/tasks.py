@@ -114,7 +114,7 @@ async def postpone_task(task_id: str, days: int = Query(default=1)):
     
     await mongodb.collection("tasks").update_one(
         {"_id": oid, "userId": user_id},
-        {"$set": {"dueAt": new_due, "updatedAt": now_utc()}},
+        {"$set": {"status": "postponed", "dueAt": new_due, "updatedAt": now_utc()}},
     )
     
     updated = await mongodb.collection("tasks").find_one({"_id": oid, "userId": user_id})
