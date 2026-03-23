@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime, timedelta, date as Date
 from fastapi import APIRouter, Query
 
@@ -8,6 +9,22 @@ from app.utils import get_default_user_id, to_object_id, weekday_sun0
 
 router = APIRouter()
 
+TIME_BLOCKS = {
+    "early_morning": (5,9),
+    "morning": (9,12),
+    "afternoon": (12,17),
+    "evening": (17,21),
+    "night": (21,24),
+}
+
+WEEKDAYS = [ "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] # converts integer to string
+
+def get_time_block(dt:datetime)-> str:
+    hour = dt.hour
+    for block, (start,end) in TIME_BLOCKS.items():
+        if start <= hour < end:
+            return block
+    return "night" # time before early morning is also night (midnight-5am)
 
 def habit_expected_on_day(habit: dict, day: Date) -> bool:
     if not habit.get("isActive", True):
@@ -93,6 +110,87 @@ async def task_completion_rate(days: int = Query(default=7, ge=1, le=365)):
         "completionRate": (completed / created) if created else None,
     }
 
+@router.get("/tasks/behavior-patterns")
+async def task_behavior_patterns(days: int = Query(default=7, ge=1, le=365)):
+    """
+    Detects behavioral patterns over the last N days
+     - most skipped / postponed tasks (grouped by category; skip uncategorized tasks)
+     - most productive day of the week (based on most completions)
+     - most productive time of the day (based on completedAt hour)
+     - tasks most often completed late (completedAt > dueAt)
+    """
+    user_id = get_default_user_id()
+    start_dt = datetime.utcnow() - timedelta(days=days)
+    
+    tasks = await mongodb.collection("tasks"). find(
+        {"userId": user_id, "createdAt": {"$gte": start_dt}}
+    ).to_list(length=1000)
+    
+    #initialize variables
+    skip_counts: dict[str, int] = defaultdict(int)
+    postpone_counts: dict[str, int] = defaultdict(int)
+    day_counts: dict[int,int] = defaultdict(int) # 0=sun...6=sat
+    block_counts: dict[str,int] = defaultdict(int)
+    late_counts: dict[str,int] =defaultdict(int)
+    
+    for t in tasks:
+        category = t.get("category")
+        status = t.get("status")
+        completed_at = t.get("completedAt")
+        due_at = t.get("dueAt")
+        
+        # skipped or postponed (with category only)
+        if category: 
+            if status == "skipped":
+                skip_counts[category]+= 1
+            elif status == "postponed":
+                postpone_counts[category]+= 1
+        
+        # calculate productive day & time block & late (done tasks only)
+        if status == "done" and isinstance(completed_at,datetime):
+            day_counts[weekday_sun0(completed_at.date())]+= 1 
+            block_counts[get_time_block(completed_at)] += 1
+            if category and isinstance(due_at, datetime) and completed_at > due_at:
+                late_counts[category] += 1
+    
+    #creates list of category-count pairs, sort list based on count value in descending order, return top 3
+    most_skipped = sorted(
+        [{"category": k, "count": v} for k,v in skip_counts.items()],
+        key=lambda x: x["count"], reverse=True
+    )[:3]
+    
+    most_postponed = sorted(
+        [{"category": k, "count": v} for k,v in postpone_counts.items()],
+        key=lambda x: x["count"], reverse=True
+    )[:3]
+               
+    productive_days = sorted(
+        [{"day": WEEKDAYS[i], "completions": day_counts.get(i,0)} for i in range(7)], 
+        key=lambda x: x["completions"], reverse=True
+    )
+    most_productive_day = productive_days[0]["day"] 
+        
+    productive_blocks = sorted(
+        [{"time_block": block, "completions": block_counts.get(block, 0)} for block in TIME_BLOCKS.keys()], 
+        key=lambda x: x["completions"], reverse=True
+    )
+    most_productive_block = productive_blocks[0]["time_block"] 
+
+    most_late = sorted(
+        [{"category": k, "times_late": v} for k,v in late_counts.items()],
+        key=lambda x: x["times_late"], reverse=True
+    )[:3]
+    
+    return {
+        "windowDays" : days,
+        "mostSkipped": most_skipped,
+        "mostPostponed": most_postponed,
+        "productiveDays": productive_days,
+        "mostProductiveDay": most_productive_day,
+        "productiveBlocks": productive_blocks,
+        "mostProductiveBlock": most_productive_block,
+        "mostLate": most_late,
+    }
 
 @router.get("/habits/streak")
 async def habit_streak(habit_id: str):
