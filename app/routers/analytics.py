@@ -100,7 +100,7 @@ async def task_completion_rate(days: int = Query(default=7, ge=1, le=365)):
         {"userId": user_id, "createdAt": {"$gte": start_dt}}
     )
     completed = await mongodb.collection("tasks").count_documents(
-        {"userId": user_id, "status": "done", "completedAt": {"$gte": start_dt}}
+        {"userId": user_id, "status": "done", "createdAt": {"$gte": start_dt}}
     )
 
     return {
@@ -123,7 +123,10 @@ async def task_behavior_patterns(days: int = Query(default=7, ge=1, le=365)):
     start_dt = datetime.utcnow() - timedelta(days=days)
     
     tasks = await mongodb.collection("tasks"). find(
-        {"userId": user_id, "createdAt": {"$gte": start_dt}}
+        {"userId": user_id, "$or": [
+        {"createdAt": {"$gte": start_dt}},
+        {"completedAt": {"$gte": start_dt}}
+    ]}
     ).to_list(length=1000)
     
     #initialize variables
