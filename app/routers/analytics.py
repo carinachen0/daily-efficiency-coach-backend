@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timedelta, date as Date
+from zoneinfo import ZoneInfo # for time block behavior
 from fastapi import APIRouter, Query
 
 from app.db import mongodb
@@ -9,7 +10,10 @@ from app.utils import get_default_user_id, to_object_id, weekday_sun0
 
 router = APIRouter()
 
+USER_TZ = ZoneInfo("America/New_York") # placeholder, can swap in for users TZ or default use EST
+
 TIME_BLOCKS = {
+    "midnight": (0,5),
     "early_morning": (5,9),
     "morning": (9,12),
     "afternoon": (12,17),
@@ -19,12 +23,16 @@ TIME_BLOCKS = {
 
 WEEKDAYS = [ "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] # converts integer to string
 
+# Behavior pattern threshold
+MIN_TASKS = 5      # minimum task in window to even generate insights, easier to hit in early usage
+MIN_COMPLETIONS = 5  # minimum completions for productive day/time block insights
+
 def get_time_block(dt:datetime)-> str:
     hour = dt.hour
     for block, (start,end) in TIME_BLOCKS.items():
         if start <= hour < end:
             return block
-    return "night" # time before early morning is also night (midnight-5am)
+    return "night" 
 
 def habit_expected_on_day(habit: dict, day: Date) -> bool:
     if not habit.get("isActive", True):
@@ -129,7 +137,15 @@ async def task_behavior_patterns(days: int = Query(default=7, ge=1, le=365)):
     ]}
     ).to_list(length=1000)
     
-    #initialize variables
+    # Global sufficiency check (end early if not enough data to generate insights)
+    if len(tasks) < MIN_TASKS:
+        return {
+            "windowDays": days,
+            "insufficientData": True,
+            "reason": f"Need at least {MIN_TASKS} tasks in the window (found {len(tasks)})",
+        }
+        
+    #initialize counters
     skip_counts: dict[str, int] = defaultdict(int)
     postpone_counts: dict[str, int] = defaultdict(int)
     day_counts: dict[int,int] = defaultdict(int) # 0=sun...6=sat
@@ -150,9 +166,10 @@ async def task_behavior_patterns(days: int = Query(default=7, ge=1, le=365)):
                 postpone_counts[category]+= 1
         
         # calculate productive day & time block & late (done tasks only)
-        if status == "done" and isinstance(completed_at,datetime):
-            day_counts[weekday_sun0(completed_at.date())]+= 1 
-            block_counts[get_time_block(completed_at)] += 1
+        if status == "done" and isinstance(completed_at, datetime):
+            local_dt = completed_at.replace(tzinfo=ZoneInfo("UTC")).astimezone(USER_TZ)
+            day_counts[weekday_sun0(local_dt.date())]+= 1 
+            block_counts[get_time_block(local_dt)] += 1
             if category and isinstance(due_at, datetime) and completed_at > due_at:
                 late_counts[category] += 1
     
@@ -171,21 +188,35 @@ async def task_behavior_patterns(days: int = Query(default=7, ge=1, le=365)):
         [{"day": WEEKDAYS[i], "completions": day_counts.get(i,0)} for i in range(7)], 
         key=lambda x: x["completions"], reverse=True
     )
-    most_productive_day = productive_days[0]["day"] 
         
     productive_blocks = sorted(
         [{"time_block": block, "completions": block_counts.get(block, 0)} for block in TIME_BLOCKS.keys()], 
         key=lambda x: x["completions"], reverse=True
     )
-    most_productive_block = productive_blocks[0]["time_block"] 
 
     most_late = sorted(
         [{"category": k, "times_late": v} for k,v in late_counts.items()],
         key=lambda x: x["times_late"], reverse=True
     )[:3]
     
+    # top insights (none if there is not enough completions)
+    total_completions = sum(day_counts.values())
+    
+    most_productive_day = (
+        productive_days[0]["day"] 
+        if total_completions >= MIN_COMPLETIONS
+        else None
+    )
+    
+    most_productive_block = (
+        productive_blocks[0]["time_block"] 
+        if total_completions >= MIN_COMPLETIONS
+        else None
+    )
+        
     return {
         "windowDays" : days,
+        "insufficientData": False,
         "mostSkipped": most_skipped,
         "mostPostponed": most_postponed,
         "productiveDays": productive_days,
