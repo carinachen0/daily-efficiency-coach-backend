@@ -9,10 +9,20 @@ from app.routers.habits import router as habits_router
 from app.routers.habit_logs import router as habit_logs_router
 from app.routers.today import router as today_router
 from app.routers.analytics import router as analytics_router
+from fastapi.middleware.cors import CORSMiddleware
+from app.routers import auth
 
 load_dotenv()
 
 app = FastAPI(title="Daily Efficiency Coach API", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # Vite's default port
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows POST, OPTIONS, etc.
+    allow_headers=["*"],
+)
 
 
 @app.on_event("startup")
@@ -29,7 +39,7 @@ async def shutdown():
 async def health():
     return {"status": "ok"}
 
-
+app.include_router(auth.router, prefix="/auth")
 app.include_router(tasks_router, prefix="/tasks", tags=["tasks"])
 app.include_router(habits_router, prefix="/habits", tags=["habits"])
 app.include_router(habit_logs_router, prefix="/habit-logs", tags=["habit-logs"])

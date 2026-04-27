@@ -9,12 +9,16 @@ from app.db import mongodb
 from app.models import Habit, HabitCreate, HabitUpdate
 from app.utils import get_default_user_id, now_utc, to_object_id
 
+from app.auth_utils import get_current_user_id
+from fastapi import Depends
+
 router = APIRouter()
 
 
 @router.post("", response_model=Habit)
-async def create_habit(payload: HabitCreate):
-    user_id = get_default_user_id()
+async def create_habit(payload: HabitCreate,
+    user_id: str = Depends(get_current_user_id)):
+        
     doc = payload.model_dump()
     
     # convert date to datetime for MongoDB compatibility
@@ -28,8 +32,9 @@ async def create_habit(payload: HabitCreate):
 
 
 @router.get("", response_model=List[Habit])
-async def list_habits(active_only: bool = Query(default=False)):
-    user_id = get_default_user_id()
+async def list_habits(active_only: bool = Query(default=False),
+    user_id: str = Depends(get_current_user_id)):
+        
     q = {"userId": user_id}
     if active_only:
         q["isActive"] = True
@@ -39,8 +44,9 @@ async def list_habits(active_only: bool = Query(default=False)):
 
 
 @router.get("/{habit_id}", response_model=Habit)
-async def get_habit(habit_id: str):
-    user_id = get_default_user_id()
+async def get_habit(habit_id: str,
+    user_id: str = Depends(get_current_user_id)):
+
     oid = to_object_id(habit_id)
     doc = await mongodb.collection("habits").find_one({"_id": oid, "userId": user_id})
     if not doc:
@@ -49,8 +55,9 @@ async def get_habit(habit_id: str):
 
 
 @router.patch("/{habit_id}", response_model=Habit)
-async def update_habit(habit_id: str, payload: HabitUpdate):
-    user_id = get_default_user_id()
+async def update_habit(habit_id: str, payload: HabitUpdate,
+    user_id: str = Depends(get_current_user_id)):
+
     oid = to_object_id(habit_id)
 
     update = payload.model_dump(exclude_unset=True)
@@ -73,8 +80,9 @@ async def update_habit(habit_id: str, payload: HabitUpdate):
 
 
 @router.delete("/{habit_id}")
-async def delete_habit(habit_id: str):
-    user_id = get_default_user_id()
+async def delete_habit(habit_id: str,
+    user_id: str = Depends(get_current_user_id)):
+
     oid = to_object_id(habit_id)
     res = await mongodb.collection("habits").delete_one({"_id": oid, "userId": user_id})
     if res.deleted_count == 0:

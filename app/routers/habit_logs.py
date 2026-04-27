@@ -9,15 +9,18 @@ from app.db import mongodb
 from app.models import HabitLog, HabitLogCreate, HabitLogUpdate
 from app.utils import get_default_user_id, now_utc, to_object_id
 
+from app.auth_utils import get_current_user_id
+from fastapi import Depends
+
 router = APIRouter()
 
-
 @router.post("", response_model=HabitLog)
-async def upsert_log(payload: HabitLogCreate):
+async def upsert_log(payload: HabitLogCreate,
+    user_id: str = Depends(get_current_user_id)):
     """
     One log per (habitId, date). Upsert = create if missing, otherwise update.
     """
-    user_id = get_default_user_id()
+    
     habit_oid = to_object_id(payload.habitId)
     day = payload.date
     
@@ -68,8 +71,8 @@ async def list_logs(
     habit_id: Optional[str] = Query(default=None),
     start: Optional[str] = Query(default=None),
     end: Optional[str] = Query(default=None),
+    user_id: str = Depends(get_current_user_id)
 ):
-    user_id = get_default_user_id()
     q = {"userId": user_id}
 
     if habit_id:
@@ -89,8 +92,9 @@ async def list_logs(
 
 
 @router.patch("/{log_id}", response_model=HabitLog)
-async def update_log(log_id: str, payload: HabitLogUpdate):
-    user_id = get_default_user_id()
+async def update_log(log_id: str, payload: HabitLogUpdate,
+    user_id: str = Depends(get_current_user_id)):
+        
     oid = to_object_id(log_id)
 
     update = payload.model_dump(exclude_unset=True)
@@ -111,8 +115,9 @@ async def update_log(log_id: str, payload: HabitLogUpdate):
 
 
 @router.delete("/{log_id}")
-async def delete_log(log_id: str):
-    user_id = get_default_user_id()
+async def delete_log(log_id: str,
+    user_id: str = Depends(get_current_user_id)):
+               
     oid = to_object_id(log_id)
     res = await mongodb.collection("habitLogs").delete_one({"_id": oid, "userId": user_id})
     if res.deleted_count == 0:

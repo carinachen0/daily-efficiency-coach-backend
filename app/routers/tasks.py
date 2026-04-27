@@ -9,12 +9,16 @@ from app.db import mongodb
 from app.models import Task, TaskCreate, TaskUpdate
 from app.utils import get_default_user_id, now_utc, to_object_id
 
+from app.auth_utils import get_current_user_id
+from fastapi import Depends
+
 router = APIRouter()
 
 
 @router.post("", response_model=Task)
-async def create_task(payload: TaskCreate):
-    user_id = get_default_user_id()
+async def create_task(payload: TaskCreate,
+    user_id: str = Depends(get_current_user_id)):
+
     doc = payload.model_dump()
     
     # combine date with midnight time to create datetime for MongoDB compatibility else 500 Internal Server Error
@@ -33,8 +37,9 @@ async def create_task(payload: TaskCreate):
 async def list_tasks(
     status_filter: Optional[str] = Query(default=None, alias="status"),
     scheduled_date: Optional[str] = Query(default=None),
+    user_id: str = Depends(get_current_user_id)
 ):
-    user_id = get_default_user_id()
+    
     q = {"userId": user_id}
 
     if status_filter:
@@ -49,8 +54,9 @@ async def list_tasks(
 
 
 @router.get("/{task_id}", response_model=Task)
-async def get_task(task_id: str):
-    user_id = get_default_user_id()
+async def get_task(task_id: str,
+    user_id: str = Depends(get_current_user_id)):
+
     oid = to_object_id(task_id)
     doc = await mongodb.collection("tasks").find_one({"_id": oid, "userId": user_id})
     if not doc:
@@ -59,8 +65,9 @@ async def get_task(task_id: str):
 
 
 @router.patch("/{task_id}", response_model=Task)
-async def update_task(task_id: str, payload: TaskUpdate):
-    user_id = get_default_user_id()
+async def update_task(task_id: str, payload: TaskUpdate,
+    user_id: str = Depends(get_current_user_id)):
+
     oid = to_object_id(task_id)
 
     update = payload.model_dump(exclude_unset=True)
@@ -84,8 +91,9 @@ async def update_task(task_id: str, payload: TaskUpdate):
 
 # convenience endpoint: Complete a task by setting status to done
 @router.patch("/{task_id}/complete", response_model=Task)
-async def complete_task(task_id: str):
-    user_id = get_default_user_id()
+async def complete_task(task_id: str,
+    user_id: str = Depends(get_current_user_id)):
+
     oid = to_object_id(task_id)
     
     res = await mongodb.collection("tasks").update_one(
@@ -100,8 +108,9 @@ async def complete_task(task_id: str):
 
 # convenience endpoint: optional if frontend needs a postpone button in the UI
 @router.patch("/{task_id}/postpone", response_model=Task)
-async def postpone_task(task_id: str, days: int = Query(default=1)):
-    user_id = get_default_user_id()
+async def postpone_task(task_id: str, days: int = Query(default=1),
+    user_id: str = Depends(get_current_user_id)):
+
     oid = to_object_id(task_id)
     
     # fetch current task to get existing dueAt
@@ -122,8 +131,9 @@ async def postpone_task(task_id: str, days: int = Query(default=1)):
 
 # convenience endpoint: Start a task by setting status to in-progress
 @router.patch("/{task_id}/start", response_model=Task)
-async def start_task(task_id: str):
-    user_id = get_default_user_id()
+async def start_task(task_id: str,
+    user_id: str = Depends(get_current_user_id)):
+
     oid = to_object_id(task_id)
     
     res = await mongodb.collection("tasks").update_one(
@@ -139,8 +149,9 @@ async def start_task(task_id: str):
 
 # convenience endpoint: Skip a task by setting status to skipped
 @router.patch("/{task_id}/skip", response_model=Task)
-async def skip_task(task_id: str):
-    user_id = get_default_user_id()
+async def skip_task(task_id: str,
+    user_id: str = Depends(get_current_user_id)):
+
     oid = to_object_id(task_id)
     
     res = await mongodb.collection("tasks").update_one(
@@ -154,8 +165,9 @@ async def skip_task(task_id: str):
     return Task(**doc)
 
 @router.delete("/{task_id}")
-async def delete_task(task_id: str):
-    user_id = get_default_user_id()
+async def delete_task(task_id: str,
+    user_id: str = Depends(get_current_user_id)):
+    
     oid = to_object_id(task_id)
     res = await mongodb.collection("tasks").delete_one({"_id": oid, "userId": user_id})
     if res.deleted_count == 0:

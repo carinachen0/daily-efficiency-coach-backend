@@ -53,7 +53,7 @@ TaskStatus = Literal["todo", "in_progress", "done", "skipped", "postponed"]
 HabitTargetType = Literal["binary", "count", "duration"]
 HabitScheduleType = Literal["daily", "weekdays", "weekly_x", "custom"]
 
-HabitLogStatus = Literal["done", "missed", "skipped"]
+HabitLogStatus = Literal["done", "missed", "skipped", "in_progress"]
 
 
 # -------------------------
@@ -201,6 +201,25 @@ class HabitLogUpdate(BaseModel):
     timeSpentSec: Optional[int] = None
     note: Optional[str] = None
 
+# -------------------------
+# AUTH / USERS
+# -------------------------
+class User(MongoBaseModel):
+    email: str
+    passwordHash: str
+    createdAt: datetime = Field(default_factory=utcnow)
+
+class UserRegister(BaseModel):
+    email: str
+    password: str
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
 
 # -------------------------
 # INDEXES
@@ -218,4 +237,7 @@ MONGO_INDEXES = {
         {"keys": [("userId", 1), ("habitId", 1), ("date", 1)], "unique": True},
         {"keys": [("userId", 1), ("date", 1)], "unique": False},
     ],
+    "users": [
+    {"keys": [("email", 1)], "unique": True},
+]
 }

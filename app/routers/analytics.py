@@ -2,45 +2,50 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timedelta, date as Date
-from zoneinfo import ZoneInfo # for time block behavior
+from zoneinfo import ZoneInfo 
 from fastapi import APIRouter, Query
 
 from app.db import mongodb
 from app.utils import get_default_user_id, to_object_id, weekday_sun0
 
+from app.auth_utils import get_current_user_id
+from fastapi import Depends
+
 router = APIRouter()
 
-USER_TZ = ZoneInfo("America/New_York") # placeholder, can swap in for users TZ or default use EST
-
+USER_TZ = ZoneInfo("America/New_York")
 TIME_BLOCKS = {
-    "midnight": (0,5),
-    "early_morning": (5,9),
-    "morning": (9,12),
-    "afternoon": (12,17),
-    "evening": (17,21),
-    "night": (21,24),
+    "midnight": (0, 5),
+    "early_morning": (5, 9),
+    "morning": (9, 12),
+    "afternoon": (12, 17),
+    "evening": (17, 21),
+    "night": (21, 24),
 }
 
-WEEKDAYS = [ "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] # converts integer to string
+WEEKDAYS = [ "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 
 # Behavior pattern threshold
-MIN_TASKS = 5      # minimum task in window to even generate insights, easier to hit in early usage
-MIN_COMPLETIONS = 5  # minimum completions for productive day/time block insights
+MIN_TASKS = 5      
+MIN_COMPLETIONS = 5  
 
 def get_time_block(dt:datetime)-> str:
     hour = dt.hour
     for block, (start,end) in TIME_BLOCKS.items():
         if start <= hour < end:
             return block
-    return "night" 
+    return "night"
 
 def habit_expected_on_day(habit: dict, day: Date) -> bool:
     if not habit.get("isActive", True):
         return False
 
     start_date = habit.get("startDate")
-    if start_date and day < start_date:
-        return False
+    if start_date:
+        if hasattr(start_date, 'date'):
+            start_date = start_date.date()
+        if day < start_date:
+            return False
 
     sched = habit.get("schedule", {}) or {}
     stype = sched.get("type", "daily")
@@ -57,12 +62,13 @@ def habit_expected_on_day(habit: dict, day: Date) -> bool:
 
 
 @router.get("/tasks/delays")
-async def task_delays(days: int = Query(default=7, ge=1, le=365)):
+async def task_delays(days: int = Query(default=7, ge=1, le=365),
+    user_id: str = Depends(get_current_user_id)):
+    
     """
     How many tasks were completed on time vs late :
       Late = completedAT > dueAt
     """
-    user_id = get_default_user_id()
     start_dt = datetime.utcnow() - timedelta(days=days)
     
     # fetch and analyze tasks that have a due date 
@@ -77,7 +83,7 @@ async def task_delays(days: int = Query(default=7, ge=1, le=365)):
     for task in completed_tasks:
         due = task["dueAt"]
         completed = task["completedAt"]
-        if completed <= due:
+        if completed.date() <= due.date():
             on_time += 1
         else:
             late += 1
@@ -94,12 +100,12 @@ async def task_delays(days: int = Query(default=7, ge=1, le=365)):
     }
 
 @router.get("/tasks/completion-rate")
-async def task_completion_rate(days: int = Query(default=7, ge=1, le=365)):
+async def task_completion_rate(days: int = Query(default=7, ge=1, le=365),
+    user_id: str = Depends(get_current_user_id)):
     """
     Simple completion rate over last N days:
       completed tasks / created tasks
     """
-    user_id = get_default_user_id()
 
     end_dt = datetime.utcnow()
     start_dt = end_dt - timedelta(days=days)
@@ -119,7 +125,8 @@ async def task_completion_rate(days: int = Query(default=7, ge=1, le=365)):
     }
 
 @router.get("/tasks/behavior-patterns")
-async def task_behavior_patterns(days: int = Query(default=7, ge=1, le=365)):
+async def task_behavior_patterns(days: int = Query(default=7, ge=1, le=365),
+    user_id: str = Depends(get_current_user_id)):
     """
     Detects behavioral patterns over the last N days
      - most skipped / postponed tasks (grouped by category; skip uncategorized tasks)
@@ -127,14 +134,14 @@ async def task_behavior_patterns(days: int = Query(default=7, ge=1, le=365)):
      - most productive time of the day (based on completedAt hour)
      - tasks most often completed late (completedAt > dueAt)
     """
-    user_id = get_default_user_id()
+    
     start_dt = datetime.utcnow() - timedelta(days=days)
     
-    tasks = await mongodb.collection("tasks"). find(
+    tasks = await mongodb.collection("tasks").find(
         {"userId": user_id, "$or": [
-        {"createdAt": {"$gte": start_dt}},
-        {"completedAt": {"$gte": start_dt}}
-    ]}
+            {"createdAt": {"$gte": start_dt}},
+            {"completedAt": {"$gte": start_dt}}
+        ]}
     ).to_list(length=1000)
     
     # Global sufficiency check (end early if not enough data to generate insights)
@@ -202,17 +209,8 @@ async def task_behavior_patterns(days: int = Query(default=7, ge=1, le=365)):
     # top insights (none if there is not enough completions)
     total_completions = sum(day_counts.values())
     
-    most_productive_day = (
-        productive_days[0]["day"] 
-        if total_completions >= MIN_COMPLETIONS
-        else None
-    )
-    
-    most_productive_block = (
-        productive_blocks[0]["time_block"] 
-        if total_completions >= MIN_COMPLETIONS
-        else None
-    )
+    most_productive_day = productive_days[0]["day"] if total_completions >= MIN_COMPLETIONS else None
+    most_productive_block = productive_blocks[0]["time_block"] if total_completions >= MIN_COMPLETIONS else None
         
     return {
         "windowDays" : days,
@@ -227,11 +225,11 @@ async def task_behavior_patterns(days: int = Query(default=7, ge=1, le=365)):
     }
 
 @router.get("/habits/streak")
-async def habit_streak(habit_id: str):
+async def habit_streak(habit_id: str,
+    user_id: str = Depends(get_current_user_id)):
     """
     Current streak: consecutive expected days ending today where log status == done.
     """
-    user_id = get_default_user_id()
     hid = to_object_id(habit_id)
 
     habit = await mongodb.collection("habits").find_one({"_id": hid, "userId": user_id})
