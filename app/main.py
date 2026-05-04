@@ -18,8 +18,8 @@ app = FastAPI(title="Daily Efficiency Coach API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins="http://localhost:5173", #Vite default port
-    "https://daily-efficiency-coach-frontend.vercel.app",  # Vercel
+    allow_origins=["http://localhost:5173", #Vite default port
+    "https://daily-efficiency-coach-frontend.vercel.app",],  # Vercel
     allow_credentials=True,
     allow_methods=["*"],  # Allows POST, OPTIONS, etc.
     allow_headers=["*"],
