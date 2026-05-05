@@ -15,7 +15,7 @@ class MongoDB:
         self.db: Optional[AsyncIOMotorDatabase] = None
 
     async def connect(self) -> None:
-        uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+        uri = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
         db_name = os.getenv("MONGODB_DB", "daily_efficiency_coach")
 
         self.client = AsyncIOMotorClient(uri)
